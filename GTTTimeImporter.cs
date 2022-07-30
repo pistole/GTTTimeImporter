@@ -284,10 +284,20 @@ namespace GTTTimeImporter
             var path = action.Path;
             if (path.ToLower().EndsWith(".exe") && ! path.Contains("\\"))
             {
-                path = game.InstallDirectory + "\\" + path;
+                
+                path = game.InstallDirectory.TrimEnd('\\') + "\\" + path;
+                if (!string.IsNullOrEmpty(action.WorkingDir))
+                {
+                    path = action.WorkingDir.TrimEnd('\\') + "\\" + action.Path;
+                }
             }
             entry.Exe = "\"" + path + "\"";
             entry.StartDir = "\"" + game.InstallDirectory + "\"";
+            if (!string.IsNullOrEmpty(action.WorkingDir))
+            {
+                entry.StartDir =  "\"" + action.WorkingDir + "\"";
+            }
+           
             entry.Icon = PlayniteApi.Paths.ConfigurationPath + "\\library\\files\\" + game.BackgroundImage;
             entry.DevkitGameID = string.Format( "playnite-{0}", game.Id);
             var tags = new HashSet<string>();
@@ -308,7 +318,7 @@ namespace GTTTimeImporter
             entry.Tags = tags.ToArray();
 
             // entry.Tags = new string[] {};
-            entry.LaunchOptions = action.AdditionalArguments;
+            entry.LaunchOptions = action.Arguments;
             entry.LastPlayTime = game.LastActivity.HasValue ? (int) Math.Floor((game.LastActivity.Value.ToUniversalTime() - new DateTime(1970, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds) : entry.LastPlayTime;
             logger.Info(entry.ToString());
             return entry;
