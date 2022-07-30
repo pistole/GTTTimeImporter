@@ -8,72 +8,44 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 using System.Windows.Controls;
 using System.Dynamic;
 using System.Data.HashFunction.CRC;
 using System.IO;
+using System.Collections.ObjectModel; 
 
 
 namespace GTTTimeImporter
 {
 
 
-    public class GTTTimeImporter : Plugin
+    public class GTTTimeImporter : GenericPlugin
     {
         private static readonly ILogger logger = LogManager.GetLogger();
 
-        string _SQLITE_DB_LOCATION = "c:/ProgramData/Gameplay Time Tracker/UserData/Profiles/User/GameplayTimeTracker.sqlite";
         string _SQL = "select ProductName, StatTotalFullRuntime/10000000.0 as RuntimeSeconds, StatRunCount, StatLastRunDateTimeUtc from Applications where StatTotalFullRuntime > 1000;";
         // string _LOCALCONFIG_VDF = "c:/Program Files (x86)/Steam/userdata/10065683/config/localconfig.vdf";
 
-        private GTTTimeImporterSettings settings { get; set; }
 
-        public override Guid Id { get; } = Guid.Parse("65e42ff8-fa71-4239-bc89-f31aed581c21");
+        private GTTTimeImporterSettingsViewModel settings { get; set; }
+
+        public override Guid Id { get; } = Guid.Parse("d9388873-be1a-47a8-ab37-7e6aeb62e435");
 
         public GTTTimeImporter(IPlayniteAPI api) : base(api)
         {
-            settings = new GTTTimeImporterSettings(this);
+            settings = new GTTTimeImporterSettingsViewModel(this);
+            Properties = new GenericPluginProperties
+            {
+                HasSettings = true
+            };
         }
 
-        public override void OnGameInstalled(Game game)
+        private string gridPath 
         {
-            // Add code to be executed when game is finished installing.
-        }
-
-        public override void OnGameStarted(Game game)
-        {
-            // Add code to be executed when game is started running.
-        }
-
-        public override void OnGameStarting(Game game)
-        {
-            // Add code to be executed when game is preparing to be started.
-        }
-
-        public override void OnGameStopped(Game game, long elapsedSeconds)
-        {
-            // Add code to be executed when game is preparing to be started.
-        }
-
-        public override void OnGameUninstalled(Game game)
-        {
-            // Add code to be executed when game is uninstalled.
-        }
-
-        public override void OnApplicationStarted()
-        {
-            // Add code to be executed when Playnite is initialized.
-        }
-
-        public override void OnApplicationStopped()
-        {
-            // Add code to be executed when Playnite is shutting down.
-        }
-
-        public override void OnLibraryUpdated()
-        {
-            // Add code to be executed when library is updated.
+            get 
+            {
+                return settings.Settings.ShortcutsVdfPath.Replace("shortcuts.vdf", "") + "grid\\";
+            }
         }
 
         public override ISettings GetSettings(bool firstRunSettings)
@@ -85,7 +57,6 @@ namespace GTTTimeImporter
         {
             return new GTTTimeImporterSettingsView();
         }
-
         private string Slugify(string name)
         {
             var retval = Regex.Replace(name, "[^A-Za-z0-9.]", "_").ToLower();
@@ -149,7 +120,7 @@ namespace GTTTimeImporter
             var games = GatherGames(args);
 
             var resultsByName = new Dictionary<string, ExpandoObject>();
-            var connectionString = new SQLiteConnectionStringBuilder {DataSource=_SQLITE_DB_LOCATION};
+            var connectionString = new SQLiteConnectionStringBuilder {DataSource=settings.Settings.GTTDbPath};
             using (var connection = new SQLiteConnection(connectionString.ToString()))
             {
                 connection.Open();
@@ -190,7 +161,7 @@ namespace GTTTimeImporter
                     dynamic sqlData = resultsByName[nameSlug];
                     logger.Info(string.Format("Matched playnite {0} to GTT {1}", game.Name, sqlData.ProductName));
                     var rhsRuntime = (float) sqlData.RuntimeSeconds;
-                    var fl = (long) Math.Floor(rhsRuntime);
+                    var fl = (ulong) Math.Floor(rhsRuntime);
                     if (fl > game.Playtime)
                     {
                         changed = true;
@@ -198,7 +169,7 @@ namespace GTTTimeImporter
                         game.Playtime = fl;
                     }
 
-                    var rhsCount = sqlData.StatRunCount;
+                    var rhsCount = (ulong) sqlData.StatRunCount;
                     if (rhsCount > game.PlayCount)
                     {
                         changed = true;
@@ -257,7 +228,29 @@ namespace GTTTimeImporter
 
         private GameAction GetRunAction(Game game)
         {
-            foreach(var action in game.OtherActions)
+            if (game.IncludeLibraryPluginAction)
+            {
+                var plugin = PlayniteApi.Addons.Plugins.First(x => x.Id == game.PluginId);
+                if (plugin != null)
+                {
+                    try {
+                        var controllerAction = plugin.GetPlayActions(new GetPlayActionsArgs { Game = game}).First();
+                        var automaticController = (AutomaticPlayController) controllerAction;
+                        return new GameAction {
+                            Name = automaticController.Name,
+                            Path = automaticController.Path,
+                            WorkingDir = automaticController.WorkingDir,
+                            Arguments = automaticController.Arguments,
+                            Type =  automaticController.Type == AutomaticPlayActionType.File ?  GameActionType.File : GameActionType.URL,
+                            IsPlayAction = true
+                        };
+                    } catch (Exception e) {
+                        logger.Error(e.ToString());
+                        throw;
+                    }
+                }
+            }
+            foreach(var action in game.GameActions)
             {
                 logger.Info("otherAction" + action.ToString());
                 if (action.Name == "Launch without Steam")
@@ -265,19 +258,14 @@ namespace GTTTimeImporter
                     return action;
                 }
             }
-            var defaultAction = game.PlayAction;
-            if (defaultAction.Type == GameActionType.File)
-            {
-                return defaultAction;
-            }
-            foreach(var action in game.OtherActions)
+            foreach(var action in game.GameActions)
             {
                 if (action.Type == GameActionType.File && action.Name != "Settings")
                 {
                     return action;
                 }
             }
-            return null;
+            return game.GameActions.FirstOrDefault(x => x.IsPlayAction);
 
         }
 
@@ -293,11 +281,33 @@ namespace GTTTimeImporter
             action = PlayniteApi.ExpandGameVariables(game, action);
             var entry = new VDFParser.Models.VDFEntry();
             entry.AppName = game.Name;
-            entry.Exe = action.Path;
-            entry.StartDir = game.InstallDirectory;
-            entry.Icon = game.GameImagePath + "\\" + game.BackgroundImage;
+            var path = action.Path;
+            if (path.ToLower().EndsWith(".exe") && ! path.Contains("\\"))
+            {
+                path = game.InstallDirectory + "\\" + path;
+            }
+            entry.Exe = "\"" + path + "\"";
+            entry.StartDir = "\"" + game.InstallDirectory + "\"";
+            entry.Icon = PlayniteApi.Paths.ConfigurationPath + "\\library\\files\\" + game.BackgroundImage;
             entry.DevkitGameID = string.Format( "playnite-{0}", game.Id);
-            entry.Tags = game.Categories.Select(x => x.Name).ToArray();
+            var tags = new HashSet<string>();
+            // tags.Add("Non STEAM");
+            if (game.Categories != null) {
+                foreach (var c in game.Categories)
+                {
+                    tags.Add(c.Name);
+                }
+            }
+            if (game.Genres != null) {
+                foreach (var g in game.Genres)
+                {
+                    tags.Add(g.Name);
+                }
+            }
+            logger.Info("tags " + tags.Aggregate((m, n) => m + ", " + n));
+            entry.Tags = tags.ToArray();
+
+            // entry.Tags = new string[] {};
             entry.LaunchOptions = action.AdditionalArguments;
             entry.LastPlayTime = game.LastActivity.HasValue ? (int) Math.Floor((game.LastActivity.Value.ToUniversalTime() - new DateTime(1970, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds) : entry.LastPlayTime;
             logger.Info(entry.ToString());
@@ -309,13 +319,20 @@ namespace GTTTimeImporter
             get 
             {   
                 // fixme
-                return "c:\\Program Files (x86)\\Steam\\userdata\\10065683\\config\\shortcuts.vdf";
+                return settings.Settings.ShortcutsVdfPath;
+                // return "c:\\Program Files (x86)\\Steam\\userdata\\10065683\\config\\shortcuts.vdf";
             }
         }
 
         private void AddToSteam(GameMenuItemActionArgs args)
         {
-            var parsed = VDFParser.VDFParser.Parse(ShortcutsVdfPath).ToList();
+            List<VDFParser.Models.VDFEntry> parsed = null;
+            try {
+                parsed = VDFParser.VDFParser.Parse(ShortcutsVdfPath).ToList();
+            } catch (VDFParser.VDFTooShortException e) {
+                logger.Warn("got exeption trying to parse shortcuts, will useempty list " + e.ToString());
+                parsed = new List<VDFParser.Models.VDFEntry>();
+            }
             logger.Info(parsed.ToString());
             bool isNew = false;
             foreach(var game in args.Games)
@@ -330,19 +347,21 @@ namespace GTTTimeImporter
                         break;
                     }
                 }
-                logger.Info(goldenEntry.ToString());
+                logger.Info(goldenEntry != null ? goldenEntry.ToString(): "no golden entry");
                 if (goldenEntry == null)
                 {
                     isNew = true;
                     goldenEntry = CreateEntry(game);
+                    logger.Info(goldenEntry.ToString());
                 }
 
                 logger.Info(game.ToString());
                 var stringToCrc = goldenEntry.Exe + goldenEntry.AppName;
                 logger.Info(stringToCrc);
-                var hashed = CalculateHashLower(stringToCrc);
-                logger.Info((hashed << 32).ToString());
-                hashed = (hashed << 32) | 0x02000000;
+                var lower = CalculateHashLower(stringToCrc);
+                logger.Info("lower " + lower.ToString());
+                logger.Info((lower << 32).ToString());
+                var hashed = (lower << 32) | 0x02000000;
                 logger.Info(hashed.ToString());
                 var steamUrl = "steam://rungameid/" + hashed.ToString();
                 var action = GetRunAction(game);
@@ -352,29 +371,79 @@ namespace GTTTimeImporter
                 }
                 logger.Info(action.ToString());
                 logger.Info(CreateEntry(game).ToString());
-                if (action == game.PlayAction)
+                if (game.GameActions == null || ! game.GameActions.HasItems())
+                {
+                    game.GameActions = new ObservableCollection<GameAction>();
+                    game.IncludeLibraryPluginAction = false;
+                    // create new action
+                    var newAction = new GameAction();
+                    newAction.Type = GameActionType.URL;
+                    newAction.Path = steamUrl;
+                    newAction.Name = game.Name;
+                    newAction.IsPlayAction = true;
+                    
+                    // move old action to other actions with title "Launch without Steam"
+                    var oldAction = action;
+                    oldAction.Name = "Launch without Steam";
+                    oldAction.IsPlayAction = false;
+                    game.GameActions.Add(oldAction);
+                    game.GameActions.Insert(0, newAction);
+
+
+                }
+                else if (action == game.GameActions[0])
                 {
                     logger.Info("Create New playAction");
                     // create new action
                     var newAction = new GameAction();
                     newAction.Type = GameActionType.URL;
-                    newAction.Arguments = steamUrl;
+                    newAction.Path = steamUrl;
+                    newAction.Name = game.Name;
+                    newAction.IsPlayAction = true;
                     
                     // move old action to other actions with title "Launch without Steam"
-                    var oldAction = game.PlayAction;
+                    var oldAction = action;
                     oldAction.Name = "Launch without Steam";
-                    game.OtherActions.Add(oldAction);
-                    game.PlayAction = newAction;
+                    oldAction.IsPlayAction = false;
+                    game.GameActions.Insert(0, newAction);
                 }
                 logger.Info("isNew " + isNew.ToString());
 
                 if (isNew)
                 {
                     parsed.Add(goldenEntry);
+                    Directory.CreateDirectory(this.gridPath);
+                    logger.Info(game.CoverImage);
+                    if (!string.IsNullOrEmpty(game.CoverImage))
+                    {
+                        var extension = game.CoverImage.Split('.').Last();
+                        var dest =  gridPath + lower.ToString() + "p." + extension;
+                        logger.Info(string.Format("coverImage {0}, extension {1}, dest {2} ", PlayniteApi.Paths.ConfigurationPath + "\\library\\files\\" + game.CoverImage, extension, dest));
+                        if (! File.Exists(dest))
+                        {
+                            File.Copy(PlayniteApi.Paths.ConfigurationPath + "\\library\\files\\" + game.CoverImage, dest);
+                        }
+                    }
+                    if (!string.IsNullOrEmpty(game.BackgroundImage))
+                    {
+                        var extension = game.BackgroundImage.Split('.').Last();
+                        var dest =  gridPath + lower.ToString() + "." + extension;
+                        logger.Info(string.Format("BackGroundImage {0}, extension {1}, dest {2} ", PlayniteApi.Paths.ConfigurationPath + "\\library\\files\\" + game.BackgroundImage, extension, dest));
+                        if (! File.Exists(dest))
+                        {
+                            File.Copy(PlayniteApi.Paths.ConfigurationPath + "\\library\\files\\" + game.BackgroundImage, dest);
+                        }
+                        dest =  gridPath + lower.ToString() + "_hero." + extension;
+                        if (! File.Exists(dest))
+                        {
+                            File.Copy(PlayniteApi.Paths.ConfigurationPath + "\\library\\files\\" + game.BackgroundImage, dest);
+                        }
+                    }
                 }
                 // write out shortcuts
                 var output = VDFParser.VDFSerializer.Serialize(parsed.ToArray());
                 var backupPath = ShortcutsVdfPath.Replace(".vdf", "-bak.rhp.vdf");
+                File.Delete(backupPath);
                 File.Move(ShortcutsVdfPath, backupPath);
                 File.WriteAllBytes(ShortcutsVdfPath, output);
                 // update game db
@@ -383,7 +452,7 @@ namespace GTTTimeImporter
         }
 
         // To add new main menu items override GetMainMenuItems
-        public override List<MainMenuItem> GetMainMenuItems(GetMainMenuItemsArgs args2)
+        public override IEnumerable<MainMenuItem> GetMainMenuItems(GetMainMenuItemsArgs args2)
         {
             return new List<MainMenuItem>
             {
@@ -395,7 +464,7 @@ namespace GTTTimeImporter
             };
         }
 
-        public override List<GameMenuItem> GetGameMenuItems(GetGameMenuItemsArgs args2)
+        public override IEnumerable<GameMenuItem> GetGameMenuItems(GetGameMenuItemsArgs args2)
         {
             return new List<GameMenuItem>
             {

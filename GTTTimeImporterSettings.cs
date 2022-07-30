@@ -1,5 +1,5 @@
-﻿using Newtonsoft.Json;
-using Playnite.SDK;
+﻿using Playnite.SDK;
+using Playnite.SDK.Data;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -8,25 +8,32 @@ using System.Threading.Tasks;
 
 namespace GTTTimeImporter
 {
-    public class GTTTimeImporterSettings : ISettings
+    public class GTTTimeImporterSettings : ObservableObject
+    {
+        private string shortcutsVdfPath = string.Empty;
+        private string gttDbPath = string.Empty;
+
+        public string ShortcutsVdfPath { get => shortcutsVdfPath; set => SetValue(ref shortcutsVdfPath, value); }
+        public string GTTDbPath { get => gttDbPath; set => SetValue(ref gttDbPath, value); }
+    }
+
+    public class GTTTimeImporterSettingsViewModel : ObservableObject, ISettings
     {
         private readonly GTTTimeImporter plugin;
+        private GTTTimeImporterSettings editingClone { get; set; }
 
-        public string Option1 { get; set; } = string.Empty;
-
-        public bool Option2 { get; set; } = false;
-
-        // Playnite serializes settings object to a JSON object and saves it as text file.
-        // If you want to exclude some property from being saved then use `JsonIgnore` ignore attribute.
-        [JsonIgnore]
-        public bool OptionThatWontBeSaved { get; set; } = false;
-
-        // Parameterless constructor must exist if you want to use LoadPluginSettings method.
-        public GTTTimeImporterSettings()
+        private GTTTimeImporterSettings settings;
+        public GTTTimeImporterSettings Settings
         {
+            get => settings;
+            set
+            {
+                settings = value;
+                OnPropertyChanged();
+            }
         }
 
-        public GTTTimeImporterSettings(GTTTimeImporter plugin)
+        public GTTTimeImporterSettingsViewModel(GTTTimeImporter plugin)
         {
             // Injecting your plugin instance is required for Save/Load method because Playnite saves data to a location based on what plugin requested the operation.
             this.plugin = plugin;
@@ -37,27 +44,32 @@ namespace GTTTimeImporter
             // LoadPluginSettings returns null if not saved data is available.
             if (savedSettings != null)
             {
-                Option1 = savedSettings.Option1;
-                Option2 = savedSettings.Option2;
+                Settings = savedSettings;
+            }
+            else
+            {
+                Settings = new GTTTimeImporterSettings();
             }
         }
 
         public void BeginEdit()
         {
             // Code executed when settings view is opened and user starts editing values.
+            editingClone = Serialization.GetClone(Settings);
         }
 
         public void CancelEdit()
         {
             // Code executed when user decides to cancel any changes made since BeginEdit was called.
             // This method should revert any changes made to Option1 and Option2.
+            Settings = editingClone;
         }
 
         public void EndEdit()
         {
             // Code executed when user decides to confirm changes made since BeginEdit was called.
             // This method should save settings made to Option1 and Option2.
-            plugin.SavePluginSettings(this);
+            plugin.SavePluginSettings(Settings);
         }
 
         public bool VerifySettings(out List<string> errors)
