@@ -4,3 +4,4 @@ bin/
 packages/
 *.dll
 *.pdb
+tmp/
