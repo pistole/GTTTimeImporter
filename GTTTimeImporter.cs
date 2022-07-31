@@ -12,7 +12,7 @@ using System.Windows.Controls;
 using System.Dynamic;
 using System.Data.HashFunction.CRC;
 using System.IO;
-using System.Collections.ObjectModel; 
+using System.Collections.ObjectModel;
 
 
 namespace GTTTimeImporter
@@ -40,9 +40,9 @@ namespace GTTTimeImporter
             };
         }
 
-        private string gridPath 
+        private string gridPath
         {
-            get 
+            get
             {
                 return settings.Settings.ShortcutsVdfPath.Replace("shortcuts.vdf", "") + "grid\\";
             }
@@ -284,7 +284,7 @@ namespace GTTTimeImporter
             var path = action.Path;
             if (path.ToLower().EndsWith(".exe") && ! path.Contains("\\"))
             {
-                
+
                 path = game.InstallDirectory.TrimEnd('\\') + "\\" + path;
                 if (!string.IsNullOrEmpty(action.WorkingDir))
                 {
@@ -297,11 +297,12 @@ namespace GTTTimeImporter
             {
                 entry.StartDir =  "\"" + action.WorkingDir + "\"";
             }
-           
+
             entry.Icon = PlayniteApi.Paths.ConfigurationPath + "\\library\\files\\" + game.BackgroundImage;
             entry.DevkitGameID = string.Format( "playnite-{0}", game.Id);
             var tags = new HashSet<string>();
-            // tags.Add("Non STEAM");
+            tags.Add("Non STEAM");
+            tags.Add("Installed Locally");
             if (game.Categories != null) {
                 foreach (var c in game.Categories)
                 {
@@ -322,12 +323,12 @@ namespace GTTTimeImporter
             entry.LastPlayTime = game.LastActivity.HasValue ? (int) Math.Floor((game.LastActivity.Value.ToUniversalTime() - new DateTime(1970, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds) : entry.LastPlayTime;
             logger.Info(entry.ToString());
             return entry;
-        } 
+        }
 
         private string ShortcutsVdfPath
         {
-            get 
-            {   
+            get
+            {
                 // fixme
                 return settings.Settings.ShortcutsVdfPath;
                 // return "c:\\Program Files (x86)\\Steam\\userdata\\10065683\\config\\shortcuts.vdf";
@@ -391,7 +392,7 @@ namespace GTTTimeImporter
                     newAction.Path = steamUrl;
                     newAction.Name = game.Name;
                     newAction.IsPlayAction = true;
-                    
+
                     // move old action to other actions with title "Launch without Steam"
                     var oldAction = action;
                     oldAction.Name = "Launch without Steam";
@@ -410,7 +411,7 @@ namespace GTTTimeImporter
                     newAction.Path = steamUrl;
                     newAction.Name = game.Name;
                     newAction.IsPlayAction = true;
-                    
+
                     // move old action to other actions with title "Launch without Steam"
                     var oldAction = action;
                     oldAction.Name = "Launch without Steam";
