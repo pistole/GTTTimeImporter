@@ -228,25 +228,40 @@ namespace GTTTimeImporter
 
         private GameAction GetRunAction(Game game)
         {
+            logger.Info("game.IncludeLibraryPluginAction " + game.IncludeLibraryPluginAction.ToString());
             if (game.IncludeLibraryPluginAction)
             {
-                var plugin = PlayniteApi.Addons.Plugins.First(x => x.Id == game.PluginId);
+                var plugin = PlayniteApi.Addons.Plugins.FirstOrDefault(x => x.Id == game.PluginId);
                 if (plugin != null)
                 {
-                    try {
-                        var controllerAction = plugin.GetPlayActions(new GetPlayActionsArgs { Game = game}).First();
-                        var automaticController = (AutomaticPlayController) controllerAction;
+                    var libraryPlugin = plugin as LibraryPlugin;
+                    logger.Info(plugin.ToString());
+                    logger.Info(libraryPlugin?.ToString());
+                    if (settings.Settings.UseGogGalaxy && libraryPlugin != null && libraryPlugin.Name == "GOG") {
                         return new GameAction {
-                            Name = automaticController.Name,
-                            Path = automaticController.Path,
-                            WorkingDir = automaticController.WorkingDir,
-                            Arguments = automaticController.Arguments,
-                            Type =  automaticController.Type == AutomaticPlayActionType.File ?  GameActionType.File : GameActionType.URL,
-                            IsPlayAction = true
-                        };
-                    } catch (Exception e) {
-                        logger.Error(e.ToString());
-                        throw;
+                                Name = game.Name,
+                                Path = settings.Settings.GogGalaxyPath,
+                                WorkingDir = game.InstallDirectory,
+                                Arguments = string.Format(@"/gameId={0} /command=runGame /path=""{1}""", game.GameId, game.InstallDirectory),
+                                Type = GameActionType.File,
+                                IsPlayAction = true
+                            };
+                    } else {
+                        try {
+                            var controllerAction = plugin.GetPlayActions(new GetPlayActionsArgs { Game = game}).First();
+                            var automaticController = (AutomaticPlayController) controllerAction;
+                            return new GameAction {
+                                Name = automaticController.Name,
+                                Path = automaticController.Path,
+                                WorkingDir = automaticController.WorkingDir,
+                                Arguments = automaticController.Arguments,
+                                Type =  automaticController.Type == AutomaticPlayActionType.File ?  GameActionType.File : GameActionType.URL,
+                                IsPlayAction = true
+                            };
+                        } catch (Exception e) {
+                            logger.Error(e.ToString());
+                            throw;
+                        }
                     }
                 }
             }
@@ -271,7 +286,6 @@ namespace GTTTimeImporter
 
         private VDFParser.Models.VDFEntry CreateEntry(Game game)
         {
-            // 29-07 19:37:51.143|INFO|GTTTimeImporter:[VDFEntry: AppName=Amatsutsumi, Exe="D:\games\gog\Amatsutsumi\cmvs64.exe", StartDir="D:\games\gog\Amatsutsumi", Icon=d:\games\gog\Amatsutsumi\Amatsutsumi-banner-c868528cd30966b87e384bd26c22.jpg, ShortcutPath=, LaunchOptions=, IsHidden=0, AllowDesktopConfig=1, AllowOverlay=1, OpenVR=0, Devkit=0, DevkitGameID=, LastPlayTime=1659141198, Tags=GOG.com, sekai, Visual Novel, r18-patched, Non STEAM, Sketch, VOICED VNS]
             var action = GetRunAction(game);
             logger.Info(action.ToString());
             if (action == null)
@@ -301,8 +315,6 @@ namespace GTTTimeImporter
             entry.Icon = PlayniteApi.Paths.ConfigurationPath + "\\library\\files\\" + game.BackgroundImage;
             entry.DevkitGameID = string.Format( "playnite-{0}", game.Id);
             var tags = new HashSet<string>();
-            tags.Add("Non STEAM");
-            tags.Add("Installed Locally");
             if (game.Categories != null) {
                 foreach (var c in game.Categories)
                 {
@@ -315,6 +327,9 @@ namespace GTTTimeImporter
                     tags.Add(g.Name);
                 }
             }
+            tags.Add("Non STEAM");
+            tags.Add("Installed locally");
+
             logger.Info("tags " + tags.Aggregate((m, n) => m + ", " + n));
             entry.Tags = tags.ToArray();
 
@@ -422,7 +437,10 @@ namespace GTTTimeImporter
 
                 if (isNew)
                 {
+                    goldenEntry.appid = (int)lower;
                     parsed.Add(goldenEntry);
+                }
+                {
                     Directory.CreateDirectory(this.gridPath);
                     logger.Info(game.CoverImage);
                     if (!string.IsNullOrEmpty(game.CoverImage))
@@ -437,6 +455,7 @@ namespace GTTTimeImporter
                     }
                     if (!string.IsNullOrEmpty(game.BackgroundImage))
                     {
+                        goldenEntry.Icon = PlayniteApi.Paths.ConfigurationPath + "\\library\\files\\" + game.BackgroundImage;
                         var extension = game.BackgroundImage.Split('.').Last();
                         var dest =  gridPath + lower.ToString() + "." + extension;
                         logger.Info(string.Format("BackGroundImage {0}, extension {1}, dest {2} ", PlayniteApi.Paths.ConfigurationPath + "\\library\\files\\" + game.BackgroundImage, extension, dest));

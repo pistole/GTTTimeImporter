@@ -10,5 +10,10 @@
         <TextBox Text="{Binding Settings.ShortcutsVdfPath}"/>
         <TextBlock Text="GTT db path:"/>
         <TextBox Text="{Binding Settings.GTTDbPath}"/>
+        <TextBlock Text="Use Gog Galaxy Client when Launching Games:"/>
+        <CheckBox IsChecked="{Binding Path=Settings.UseGogGalaxy, Mode=TwoWay}"/>
+        <TextBlock Text="Gog Galxy Client path:"/>
+        <TextBox Text="{Binding Settings.GogGalaxyPath}"/>
+
     </StackPanel>
 </UserControl>
