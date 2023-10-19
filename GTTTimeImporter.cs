@@ -23,9 +23,7 @@ namespace GTTTimeImporter
     {
         private static readonly ILogger logger = LogManager.GetLogger();
 
-        string _SQL = "select ProductName, StatTotalFullRuntime/10000000.0 as RuntimeSeconds, StatRunCount, StatLastRunDateTimeUtc from Applications where StatTotalFullRuntime > 1000;";
-        // string _LOCALCONFIG_VDF = "c:/Program Files (x86)/Steam/userdata/10065683/config/localconfig.vdf";
-
+        string _SQL = "select Id, ProductName, StatTotalFullRuntime/10000000.0 as RuntimeSeconds, StatRunCount, StatLastRunDateTimeUtc from Applications where StatTotalFullRuntime > 1000;";
 
         private GTTTimeImporterSettingsViewModel settings { get; set; }
 
@@ -104,6 +102,7 @@ namespace GTTTimeImporter
         private ExpandoObject ParseRow(System.Collections.Specialized.NameValueCollection row)
         {
             dynamic retval = new ExpandoObject();
+            retval.Id = row["Id"];
             retval.ProductName = row["ProductName"];
             retval.RuntimeSeconds = float.Parse(row["RuntimeSeconds"]);
             retval.StatRunCount = int.Parse(row["StatRunCount"]);
@@ -118,6 +117,7 @@ namespace GTTTimeImporter
             var changed = false;
             var logger = LogManager.GetLogger();
             var games = GatherGames(args);
+            var sqlUpdateData = new List<ExpandoObject>();
 
             var resultsByName = new Dictionary<string, ExpandoObject>();
             var connectionString = new SQLiteConnectionStringBuilder {DataSource=settings.Settings.GTTDbPath};
@@ -134,7 +134,7 @@ namespace GTTTimeImporter
                         var name = vals["ProductName"];
                         name = Slugify(name);
                         dynamic parsedRow = ParseRow(vals);
-                        // string _SQL = "select ProductName, StatTotalFullRuntime/10000000.0 as RuntimeSeconds, StatRunCount, StatLastRunDateTimeUtc from Applications where StatTotalFullRuntime > 1000;";
+                        // string _SQL = "select Id, ProductName, StatTotalFullRuntime/10000000.0 as RuntimeSeconds, StatRunCount, StatLastRunDateTimeUtc from Applications where StatTotalFullRuntime > 1000;";
 
                         if (resultsByName.ContainsKey(name))
                         {
@@ -151,6 +151,7 @@ namespace GTTTimeImporter
                         logger.Info(JsonConvert.SerializeObject(rowDict, Formatting.Indented));
                     }
                 }
+                connection.Close();
             }
             foreach (var nameSlug in resultsByName.Keys)
             {
@@ -162,27 +163,53 @@ namespace GTTTimeImporter
                     logger.Info(string.Format("Matched playnite {0} to GTT {1}", game.Name, sqlData.ProductName));
                     var rhsRuntime = (float) sqlData.RuntimeSeconds;
                     var fl = (ulong) Math.Floor(rhsRuntime);
+                    dynamic sqlOutputData = new ExpandoObject();
+                    sqlOutputData.Id = sqlData.Id;
+                    var sqlChanged = false;
+                    sqlOutputData.RuntimeSeconds = rhsRuntime;
                     if (fl > game.Playtime)
                     {
                         changed = true;
-                        logger.Info(string.Format("old runtime {0} new runtime {1}", game.Playtime, fl));
+                        logger.Info(string.Format("playnite runtime {0} gtt runtime {1}", game.Playtime, fl));
                         game.Playtime = fl;
+                    }
+                    else if (fl < game.Playtime)
+                    {
+                        sqlChanged = true;
+                        sqlOutputData.RuntimeSeconds = game.Playtime;
+                        logger.Info(string.Format("playnite runtime {0} gtt runtime {1}", game.Playtime, fl));
                     }
 
                     var rhsCount = (ulong) sqlData.StatRunCount;
+                    sqlOutputData.StatRunCount = rhsCount;
+
                     if (rhsCount > game.PlayCount)
                     {
                         changed = true;
-                        logger.Info(string.Format("old playcount {0} new playcount {1}", game.PlayCount, rhsCount));
+                        logger.Info(string.Format("playnite playcount {0} gtt playcount {1}", game.PlayCount, rhsCount));
                         game.PlayCount = rhsCount;
                     }
+                    else if (rhsCount < game.PlayCount)
+                    {
+                        sqlChanged = true;
+                        sqlOutputData.StatRunCount = game.PlayCount;
+                        logger.Info(string.Format("playnite playcount {0} gtt playcount {1}", game.PlayCount, rhsCount));
+                    }
+
                     DateTimeOffset rhsDate = sqlData.StatLastRunDateTimeUtc;
+                    sqlOutputData.StatLastRunDateTimeUtc = rhsDate;
                     if (game.LastActivity < rhsDate.LocalDateTime)
                     {
                         changed = true;
-                        logger.Info(string.Format("old last activity {0} new last activity {1}", game.LastActivity, rhsDate.LocalDateTime));
+                        logger.Info(string.Format("playnite last activity {0} gtt last activity {1}", game.LastActivity, rhsDate.LocalDateTime));
                         game.LastActivity = rhsDate.LocalDateTime;
 
+                    }
+                    else if (game.LastActivity > rhsDate.LocalDateTime)
+                    {
+                        sqlChanged = true;
+                        sqlOutputData.StatLastRunDateTimeUtc = game.LastActivity?.ToUniversalTime() ?? rhsDate.LocalDateTime;
+                        logger.Info(string.Format("playnite last activity {0} gtt last activity {1}", game.LastActivity, rhsDate.LocalDateTime));
                     }
 
                     if (changed)
@@ -190,9 +217,36 @@ namespace GTTTimeImporter
                         logger.Info(string.Format("changed {0}", game.Name));
                         PlayniteApi.Database.Games.Update(game);
                     }
+                    if (sqlChanged)
+                    {
+                        logger.Info(string.Format("sqlChanged {0} {1}", game.Name, sqlData.Id));
+                        sqlUpdateData.Add(sqlOutputData);
+                    }
 
                 }
-
+                if (settings.Settings.UpdateGttDb && sqlUpdateData.Count > 0)
+                {
+                    using (var connection = new SQLiteConnection(connectionString.ToString()))
+                    {
+                        connection.Open();
+                        var command = new SQLiteCommand(connection);
+                        command.CommandText = "update Applications set StatTotalFullRuntime = @RuntimeSeconds, StatRunCount = @StatRunCount, StatLastRunDateTimeUtc = @StatLastRunDateTimeUtc where Id = @Id;";
+                        command.Parameters.Add(new SQLiteParameter("@RuntimeSeconds"));
+                        command.Parameters.Add(new SQLiteParameter("@StatRunCount"));
+                        command.Parameters.Add(new SQLiteParameter("@StatLastRunDateTimeUtc"));
+                        command.Parameters.Add(new SQLiteParameter("@Id"));
+                        foreach (dynamic row in sqlUpdateData)
+                        {
+                            command.Parameters["@RuntimeSeconds"].Value = row.RuntimeSeconds * 10000000;
+                            command.Parameters["@StatRunCount"].Value = row.StatRunCount;
+                            command.Parameters["@StatLastRunDateTimeUtc"].Value = row.StatLastRunDateTimeUtc.ToString("o").Replace("T", " ");
+                            command.Parameters["@Id"].Value = row.Id;
+                            logger.Info("executing " + command.CommandText + " " + string.Join(", ", command.Parameters.Cast<SQLiteParameter>().Select(x => x.ParameterName + "=" + x.Value.ToString())));
+                            command.ExecuteNonQuery();
+                        }
+                    connection.Close();
+                    }
+                }
             }
 
 

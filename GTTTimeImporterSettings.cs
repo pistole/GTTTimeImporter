@@ -16,12 +16,15 @@ namespace GTTTimeImporter
         private string gogGalaxyPath = @"C:\Program Files (x86)\GOG Galaxy\GalaxyClient.exe";
 
         private bool useGogGalaxy = false;
+        private bool updateGttDb = false;
         public string ShortcutsVdfPath { get => shortcutsVdfPath; set => SetValue(ref shortcutsVdfPath, value); }
         public string GTTDbPath { get => gttDbPath; set => SetValue(ref gttDbPath, value); }
 
         public bool UseGogGalaxy { get => useGogGalaxy; set => SetValue(ref useGogGalaxy, value); }
 
         public string GogGalaxyPath { get => gogGalaxyPath; set => SetValue(ref gogGalaxyPath, value); }
+
+        public bool UpdateGttDb { get => updateGttDb; set => SetValue(ref updateGttDb, value);}
 
 
     }

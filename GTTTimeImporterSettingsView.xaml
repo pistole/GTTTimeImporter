@@ -10,6 +10,8 @@
         <TextBox Text="{Binding Settings.ShortcutsVdfPath}"/>
         <TextBlock Text="GTT db path:"/>
         <TextBox Text="{Binding Settings.GTTDbPath}"/>
+        <TextBlock Text="Update the GTT Db if data is out of date:"/>
+        <CheckBox IsChecked="{Binding Path=Settings.UpdateGttDb, Mode=TwoWay}"/>
         <TextBlock Text="Use Gog Galaxy Client when Launching Games:"/>
         <CheckBox IsChecked="{Binding Path=Settings.UseGogGalaxy, Mode=TwoWay}"/>
         <TextBlock Text="Gog Galxy Client path:"/>
